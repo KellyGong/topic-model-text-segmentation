@@ -11,19 +11,21 @@ file_parser.add_argument('--test', type=str, default=None, help='path contain te
 file_parser.add_argument('--rebuild_vocab', help='reprocess dataset to produce vocab file', action='store_true')
 file_parser.add_argument('--load_json', help='load args from json file', action='store_true')
 file_parser.add_argument('--language', choices=['EN', 'DE'], default='DE', help='dataset language')
-
+file_parser.add_argument('--reproduce_bert', help='reuse bert to produce embedding', action='store_true')
+file_parser.add_argument('--reconstruct', help='re transfer raw data to save data file', action='store_true')
 
 model_parser = parser.add_argument_group(title='model', description='model parameter')
 model_parser.add_argument('--model', choices=['LSTM-LSTM', 'BERT-LSTM', 'NVI-BERT', 'BERT-TRANSFORMER', 'BERT-S-LSTM'], required=True)
 model_parser.add_argument('--lstm_hidden_size', type=int, default=128)
 model_parser.add_argument('--lstm_layer', type=int, default=2)
 model_parser.add_argument('--topic_size', type=int, default=50)
+model_parser.add_argument('--gru', action='store_true', help='if use gru in model else lstm')
 
 
 nvi_parser = parser.add_argument_group(title='nvi model', description='nvi model parameter')
-nvi_parser.add_argument('--en1-units', type=int, default=100)
-nvi_parser.add_argument('--en2-units', type=int, default=100)
-nvi_parser.add_argument('--num-topic', type=int, default=50)
+nvi_parser.add_argument('--en1-units', type=int, default=2000)
+nvi_parser.add_argument('--en2-units', type=int, default=400)
+nvi_parser.add_argument('--num-topic', type=int, default=64)
 nvi_parser.add_argument('--init-mult', type=float, default=1.0)
 nvi_parser.add_argument('--variance', type=float, default=0.995)
 
@@ -45,16 +47,32 @@ save_parser = parser.add_argument_group(title='save', description='save model')
 save_parser.add_argument('--save_path', type=str, required=True, help='path to save model or load model')
 
 
-args = parser.parse_args(['--train', 'data/wikisection_dataset_ref/de_city/de_city_train',
-                          '--valid', 'data/wikisection_dataset_ref/de_city/de_city_validation',
-                          '--test', 'data/wikisection_dataset_ref/de_city/de_city_test',
-                          '--model', 'BERT-S-LSTM',
+args = parser.parse_args(['--train', 'data/wikisection_dataset_ref/de_disease/de_disease_train',
+                          '--valid', 'data/wikisection_dataset_ref/de_disease/de_disease_validation',
+                          '--test', 'data/wikisection_dataset_ref/de_disease/de_disease_test',
+                          '--model', 'BERT-LSTM',
+                          # '--gru',
                           # '--rebuild_vocab',
                           # '--load_json',
-                          '--device', 'cuda:0',
+                          # '--reconstruct',
+                          # '--reproduce_bert',
+                          '--device', 'cuda:9',
                           '--lstm_hidden_size', '128',
                           '--dataset', 'wikisection',
-                          '--save_path', 'result/12-18-Bert-LSTM-wikisection-de_city_0'])
+                          '--save_path', 'result/12-31-Bert-LSTM-wikisection-de_disease_2'])
+
+# args = parser.parse_args(['--train', 'data/wikisection_dataset_ref/de_disease/de_disease_train',
+#                           '--valid', 'data/wikisection_dataset_ref/de_disease/de_disease_validation',
+#                           '--test', 'data/wikisection_dataset_ref/de_disease/de_disease_test',
+#                           '--model', 'BERT-LSTM',
+#                           # '--rebuild_vocab',
+#                           # '--load_json',
+#                           # '--reconstruct',
+#                           # '--reproduce_bert',
+#                           '--device', 'cuda:9',
+#                           '--lstm_hidden_size', '128',
+#                           '--dataset', 'wikisection',
+#                           '--save_path', 'result/12-24-Bert-LSTM-wikisection-de_disease_1'])
 
 # args = parser.parse_args(['--train', 'data/wiki_727/train',
 #                           '--valid', 'data/wiki_727/dev',

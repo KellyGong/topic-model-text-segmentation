@@ -1,7 +1,7 @@
 import logging
 from Dataset_loader import load_wikisection, load_wiki727k
 from pathlib import Path
-from Solver import BERT_Solver
+from Solver import BERT_Solver, NVI_BERT_Solver
 import json
 
 
@@ -44,6 +44,11 @@ def train(args):
 
     save(args)
 
-    bert_lstm_solver = BERT_Solver(args, train_set, valid_set, test_set)
-    bert_lstm_solver.train_and_evaluate()
+    if args.model == 'NVI-BERT':
+        solver = NVI_BERT_Solver(args, train_set, valid_set, test_set)
+
+    else:
+        solver = BERT_Solver(args, train_set, valid_set, test_set)
+
+    solver.train_and_evaluate()
 

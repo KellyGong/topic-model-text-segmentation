@@ -1,1 +1,1 @@
-from .ProdLDA import prod_lda
+from .ProdLDA import ProdLDA

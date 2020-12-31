@@ -2,3 +2,5 @@ from .lstm_classifier import LSTM_Classifier
 from .SECTOR_classifier import Sector_Classifier
 from .transformer_classifier import TransformerClassifier
 from .s_lstm_classifier import S_LSTM_Classifier
+from .lda_lstm_classifier import LDA_LSTM_Classifier
+from .lda_lstm_classifier_2 import LDA_LSTM_Classifier_2

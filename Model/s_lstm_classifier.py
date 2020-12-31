@@ -27,13 +27,21 @@ class S_LSTM_Classifier(nn.Module):
         self.Ws_segmentation = nn.Parameter(torch.Tensor(hidden_dim * 2, output_dim))
         self.bs_segmentation = nn.Parameter(torch.zeros((output_dim,)))
 
-        self.topic_classification = Topic_Pooling(output_dim=topic_size, input_dim=hidden_dim * 2)
+        self.topic_classification = Topic_Pooling_LSTM(output_dim=topic_size, input_dim=hidden_dim * 2)
         self.enforced_teach = 10
 
         self.softmax = F.softmax
         self.top = 0.7
 
-        nn.init.uniform_(self.Ws_segmentation, -0.1, 0.1)
+        self._init_parameters()
+
+    def _init_parameters(self):
+        nn.init.xavier_normal_(self.Ws_segmentation)
+        for name, param in self.rnn.named_parameters():
+            if name.startswith("weight"):
+                nn.init.xavier_normal_(param)
+            else:
+                nn.init.zeros_(param)
 
     def pad(self, paper_list):
         len_paper_list = [paper.size(0) for paper in paper_list]
@@ -51,25 +59,30 @@ class S_LSTM_Classifier(nn.Module):
                      torch.full_like(padded_segment_probability, self.top)).long().chunk(2, -1)[0].squeeze(-1)
         padded_segment_probability = padded_segment_probability.squeeze(1).chunk(2, -1)[0].squeeze(-1)
         segment_probability_papers = [res_pro_tensor.squeeze(0)[:len_paper] for (res_pro_tensor, len_paper) in
-                                      zip(padded_segment_probability.chunk(padded_segment_probability.size(0), 0), len_paper_list)]
+                                      zip(padded_segment_probability.chunk(padded_segment_probability.size(0), 0),
+                                          len_paper_list)]
         segment_label_papers = [segment_label_per_paper.squeeze(0)[:len_paper] for (segment_label_per_paper, len_paper)
                                 in zip(padded_segment_label.chunk(padded_segment_label.size(0), 0), len_paper_list)]
 
         sentences_embedding_after_rnn_papers = \
             [padded_sentences_embedding_after_rnn_paper.squeeze(0)[:len_paper]
              for (padded_sentences_embedding_after_rnn_paper, len_paper)
-                in zip(padded_sentences_embedding_after_rnn.chunk(padded_sentences_embedding_after_rnn.size(0), 0), len_paper_list)]
+             in zip(padded_sentences_embedding_after_rnn.chunk(padded_sentences_embedding_after_rnn.size(0), 0),
+                    len_paper_list)]
 
         if not enforced_teach:
-            topic_probability_papers, _ = self.topic_classification(segment_label_papers, sentences_embedding_after_rnn_papers, len_paper_list)
+            topic_probability_papers, _ = self.topic_classification(segment_label_papers,
+                                                                    sentences_embedding_after_rnn_papers,
+                                                                    len_paper_list)
         else:
-            topic_probability_papers, _ = self.topic_classification(seg_label, sentences_embedding_after_rnn_papers, len_paper_list)
+            topic_probability_papers, _ = self.topic_classification(seg_label, sentences_embedding_after_rnn_papers,
+                                                                    len_paper_list)
 
         return segment_probability_papers, segment_label_papers, topic_probability_papers
 
 
 class Topic_Pooling(nn.Module):
-    def __init__(self, output_dim, input_dim=400):
+    def __init__(self, output_dim, input_dim):
         super(Topic_Pooling, self).__init__()
         self.input_dim = input_dim
         self.pool_dim = 3 * input_dim
@@ -77,8 +90,8 @@ class Topic_Pooling(nn.Module):
         self.Ws = nn.Parameter(torch.Tensor(self.pool_dim, self.output_dim))
         self.bs = nn.Parameter(torch.zeros((self.output_dim,)))
 
-        nn.init.uniform_(self.Ws, -0.1, 0.1)
-        nn.init.uniform_(self.bs, -0.1, 0.1)
+        nn.init.xavier_normal_(self.Ws)
+        nn.init.zeros_(self.bs)
 
     def forward(self, seg_label, sentence_embedding, len_paper_list):
         papers_topic = []
@@ -87,7 +100,8 @@ class Topic_Pooling(nn.Module):
                                                                                 len_paper_list):
             seg_label_per_paper[0] = 1
             seg_label_per_paper = torch.cat(
-                (seg_label_per_paper, torch.tensor([1], dtype=torch.long, device=sentence_embedding_per_paper.device)), -1)
+                (seg_label_per_paper, torch.tensor([1], dtype=torch.long, device=sentence_embedding_per_paper.device)),
+                -1)
             segment_location = torch.nonzero(seg_label_per_paper, as_tuple=False)
             segment_length = torch.zeros((segment_location.size(0) - 1, segment_location.size(1)), dtype=torch.long,
                                          device=sentence_embedding_per_paper.device)
@@ -106,6 +120,73 @@ class Topic_Pooling(nn.Module):
 
             all_segment_embedding = torch.cat(
                 [pooling(segment_embedding) for segment_embedding in segment_embedding_split], dim=0)
+            topic_res = all_segment_embedding.matmul(self.Ws) + self.bs
+            topic_res = topic_res.chunk(topic_res.size(0), 0)
+            sentence_topic = torch.cat([per_topic.expand(topic_len, self.output_dim) for (per_topic, topic_len) in
+                                        zip(topic_res, segment_length)]
+                                       , dim=0)
+            papers_topic.append(sentence_topic)
+            papers_topic_label.append(torch.argmax(sentence_topic, dim=-1))
+
+        return papers_topic, papers_topic_label
+
+
+class Topic_Pooling_LSTM(nn.Module):
+    def __init__(self, output_dim, input_dim):
+        super(Topic_Pooling_LSTM, self).__init__()
+        self.input_dim = input_dim
+        self.pool_dim = 3 * input_dim
+        self.output_dim = output_dim
+        self.Ws = nn.Parameter(torch.Tensor(self.pool_dim, self.output_dim))
+        self.bs = nn.Parameter(torch.zeros((self.output_dim,)))
+
+        self.rnn = nn.LSTM(input_dim, 128, num_layers=2, bidirectional=True,
+                           dropout=0.5, batch_first=True)
+
+        nn.init.xavier_normal_(self.Ws)
+        nn.init.zeros_(self.bs)
+
+    def pad(self, paper_list):
+        len_paper_list = [paper.size(0) for paper in paper_list]
+        return pad_sequence(paper_list, batch_first=True, padding_value=0), len_paper_list
+
+    def forward(self, seg_label, sentence_embedding, len_paper_list):
+        papers_topic = []
+        papers_topic_label = []
+        for seg_label_per_paper, sentence_embedding_per_paper, paper_len in zip(seg_label, sentence_embedding,
+                                                                                len_paper_list):
+            seg_label_per_paper[0] = 1
+            seg_label_per_paper = torch.cat(
+                (seg_label_per_paper, torch.tensor([1], dtype=torch.long, device=sentence_embedding_per_paper.device)),
+                -1)
+            segment_location = torch.nonzero(seg_label_per_paper, as_tuple=False)
+            segment_length = torch.zeros((segment_location.size(0) - 1, segment_location.size(1)), dtype=torch.long,
+                                         device=sentence_embedding_per_paper.device)
+            for i in range(1, segment_location.size(0)):
+                segment_length[i - 1] = segment_location[i] - segment_location[i - 1]
+            segment_length = segment_length.squeeze(-1).cpu().numpy().tolist()
+            segment_embedding_split = torch.split(sentence_embedding_per_paper, segment_length, dim=0)
+
+            def pooling(segment_embedding):
+                mean_segment_embedding = torch.mean(segment_embedding, dim=0)
+                max_segment_embedding = torch.max(segment_embedding, dim=0)[0]
+                last_segment_embedding = segment_embedding[-1][:].clone()
+                pool_segment_embedding = torch.cat(
+                    (mean_segment_embedding, max_segment_embedding, last_segment_embedding)).unsqueeze(0)
+                return pool_segment_embedding
+
+            padded_segment_embedding, len_paper_list = self.pad(segment_embedding_split)
+
+            padded_segment_embedding_after_rnn, (_) = self.rnn(padded_segment_embedding)
+
+            segment_embedding_after_rnn_papers = \
+                [padded_segment_embedding_after_rnn_paper.squeeze(0)[:len_paper]
+                 for (padded_segment_embedding_after_rnn_paper, len_paper)
+                 in zip(padded_segment_embedding_after_rnn.chunk(padded_segment_embedding_after_rnn.size(0), 0),
+                        len_paper_list)]
+
+            all_segment_embedding = torch.cat(
+                [pooling(segment_embedding) for segment_embedding in segment_embedding_after_rnn_papers], dim=0)
             topic_res = all_segment_embedding.matmul(self.Ws) + self.bs
             topic_res = topic_res.chunk(topic_res.size(0), 0)
             sentence_topic = torch.cat([per_topic.expand(topic_len, self.output_dim) for (per_topic, topic_len) in

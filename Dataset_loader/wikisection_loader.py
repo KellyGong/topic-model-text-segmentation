@@ -5,20 +5,23 @@ import numpy
 import random
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
 import json
 from tqdm import tqdm
 
+from gensim.utils import simple_preprocess
+import spacy
 
 stopword = set(stopwords.words("german"))
-padding_id = 0
-unk_id = 1
+snowball_stemmer = SnowballStemmer("german")
+nlp = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
 
 
 class Vocab:
     def __init__(self, init_unk_and_pad=False):
         if init_unk_and_pad:
             self.word_len = 2
-            self.word2int = {'unk': unk_id, 'pad': padding_id}
+            self.word2int = {'unk': 1, 'pad': 0}
             self.int2word = ['pad', 'unk']
 
         else:
@@ -48,16 +51,17 @@ class Vocab:
             json.dump({'word_len': self.word_len,
                        'word2int': self.word2int,
                        'int2word': self.int2word,
-                        'word2frequency': self.word2frequency}, f, indent=4)
+                       'word2frequency': self.word2frequency}, f, indent=4)
 
 
 class TestPaperDataset:
-    def __init__(self, paper, avg_windows_size, word_vocab, topic_vocab, head_vocab):
+    def __init__(self, paper, avg_windows_size, word_vocab, topic_vocab, head_vocab, lda_vocab):
         self.paper = paper
         self.avg_windows_size = avg_windows_size
         self.word_vocab = word_vocab
         self.topic_vocab = topic_vocab
         self.head_vocab = head_vocab
+        self.lda_vocab = lda_vocab
 
     def __len__(self):
         return len(self.paper)
@@ -77,24 +81,26 @@ def build_vocab(papers_train_path, train_path, rebuild_vocab=True):
     :param papers_train_path: list of path contains papers
     :return: word_vocab, topic_vocab, head_vocab
     """
-    word_vocab, topic_vocab, head_vocab = Vocab(), Vocab(), Vocab()
+    word_vocab, topic_vocab, head_vocab, lda_vocab = Vocab(init_unk_and_pad=True), Vocab(), Vocab(), Vocab(init_unk_and_pad=True)
 
     if not rebuild_vocab:
         word_vocab.load(Path(train_path).parent / Path('word_vocab.pt'))
         topic_vocab.load(Path(train_path).parent / Path('topic_vocab.pt'))
         head_vocab.load(Path(train_path).parent / Path('head_vocab.pt'))
-        return word_vocab, topic_vocab, head_vocab
+        lda_vocab.load(Path(train_path).parent / Path('lda_vocab.pt'))
+        return word_vocab, topic_vocab, head_vocab, lda_vocab
 
     for paper in tqdm(papers_train_path):
-        process_paper(paper, head_vocab, topic_vocab, word_vocab)
+        process_paper(paper, head_vocab, topic_vocab, word_vocab, lda_vocab)
 
     word_vocab.save(Path(train_path).parent / Path('word_vocab.pt'))
     topic_vocab.save(Path(train_path).parent / Path('topic_vocab.pt'))
     head_vocab.save(Path(train_path).parent / Path('head_vocab.pt'))
-    return word_vocab, topic_vocab, head_vocab
+    lda_vocab.save(Path(train_path).parent / Path('lda_vocab.pt'))
+    return word_vocab, topic_vocab, head_vocab, lda_vocab
 
 
-def process_paper(paper, head_vocab, topic_vocab, word_vocab):
+def process_paper(paper, head_vocab, topic_vocab, word_vocab, lda_vocab):
     with Path(paper).open('r', encoding='UTF-8') as f:
         lines = f.readlines()
     seperator = '=========='
@@ -111,6 +117,18 @@ def process_paper(paper, head_vocab, topic_vocab, word_vocab):
 
         else:
             [word_vocab.add(word) for word in nltk_seg(line)]
+            [lda_vocab.add(lda_word) for lda_word in lda_seg(line)]
+
+
+def lda_seg(sentence, allowed_postags=None):
+    if allowed_postags is None:
+        allowed_postags = ['NOUN', 'ADJ', 'VERB', 'ADV']
+    lda_words = list(simple_preprocess(sentence, deacc=True))
+    lda_words_stem = [snowball_stemmer.stem(word) for word in lda_words]
+    lda_words_remove_stopword = [word for word in lda_words_stem if word not in stopword]
+    construct_lda_sentence = nlp(" ".join(lda_words_remove_stopword))
+    lda_words_lemma = [token.lemma_ for token in construct_lda_sentence if token.pos_ in allowed_postags]
+    return lda_words_lemma
 
 
 def read_data(path):
@@ -181,13 +199,13 @@ def load_wikisection(args):
 
     papers_train_path, papers_valid_path, papers_test_path = read_data(train_path), read_data(valid_path), read_data(test_path)
 
-    word_vocab, topic_vocab, head_vocab = build_vocab(papers_train_path, train_path, args.rebuild_vocab)
+    word_vocab, topic_vocab, head_vocab, lda_vocab = build_vocab(papers_train_path, train_path, args.rebuild_vocab)
 
     mean_windows_size = cal_mean_windows_size(train_path, args.rebuild_vocab, papers_train_path, papers_valid_path, papers_test_path)
 
     train_set, valid_set, test_set = \
-        TestPaperDataset(papers_train_path, mean_windows_size, word_vocab, topic_vocab, head_vocab), \
-        TestPaperDataset(papers_valid_path, mean_windows_size, word_vocab, topic_vocab, head_vocab), \
-        TestPaperDataset(papers_test_path, mean_windows_size, word_vocab, topic_vocab, head_vocab)
+        TestPaperDataset(papers_train_path, mean_windows_size, word_vocab, topic_vocab, head_vocab, lda_vocab), \
+        TestPaperDataset(papers_valid_path, mean_windows_size, word_vocab, topic_vocab, head_vocab, lda_vocab), \
+        TestPaperDataset(papers_test_path, mean_windows_size, word_vocab, topic_vocab, head_vocab, lda_vocab)
 
     return train_set, valid_set, test_set

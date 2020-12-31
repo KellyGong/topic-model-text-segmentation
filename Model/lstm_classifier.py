@@ -26,8 +26,8 @@ class LSTM_Classifier(nn.Module):
         self.Ws_topic_classification = nn.Parameter(torch.Tensor(hidden_dim * 2, topic_size))
         self.bs_topic_classification = nn.Parameter(torch.zeros((topic_size,)))
 
-        nn.init.uniform_(self.Ws_segmentation, -0.1, 0.1)
-        nn.init.uniform_(self.Ws_topic_classification, -0.1, 0.1)
+        nn.init.xavier_normal_(self.Ws_segmentation)
+        nn.init.xavier_normal_(self.Ws_topic_classification)
 
     def pad(self, sentences_embedding_papers):
         len_paper_list = [paper.size(0) for paper in sentences_embedding_papers]
@@ -49,7 +49,8 @@ class LSTM_Classifier(nn.Module):
 
         # deal with result same shape with document
         segment_label_papers = [segment_label_per_paper.squeeze(0)[:len_paper] for (segment_label_per_paper, len_paper)
-                                in zip(padded_segment_label.chunk(padded_segment_label.size(0), 0), len_paper_list)]
+                                in
+                                zip(padded_segment_label.chunk(padded_segment_label.size(0), 0), len_paper_list)]
         padded_segment_probability = padded_segment_probability.squeeze(1).chunk(2, -1)[0].squeeze(-1)
         segment_probability_papers = [res_pro_tensor.squeeze(0)[:len_paper] for (res_pro_tensor, len_paper) in
                                       zip(padded_segment_probability.chunk(padded_segment_probability.size(0), 0), len_paper_list)]
